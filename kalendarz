@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Grafik zmianowy</title>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background: #f4f6f8;
+    color: #222;
+}
+
+header {
+    text-align: center;
+    padding: 15px;
+    background: #ffffff;
+}
+
+header img {
+    max-height: 90px;
+}
+
+main {
+    padding: 15px;
+    max-width: 1100px;
+    margin: auto;
+}
+
+select, button {
+    padding: 6px 10px;
+    font-size: 14px;
+}
+
+#calendar {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.day {
+    background: #fff;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 13px;
+}
+
+.day h4 {
+    margin: 0 0 6px 0;
+    font-size: 14px;
+}
+
+.worker {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+    padding: 3px 5px;
+    border-radius: 4px;
+}
+
+.worker.gray { background: #e0e0e0; }
+.worker.green { background: #b9f6ca; }
+.worker.blue { background: #bbdefb; }
+
+.worker button {
+    font-size: 11px;
+}
+
+footer {
+    text-align: center;
+    font-size: 12px;
+    padding: 12px;
+    color: #666;
+}
+
+#adminBtn {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    font-size: 12px;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <img src="logo.png" alt="Logo">
+</header>
+
+<main>
+    <label>Wybierz swoje imię:</label>
+    <select id="workerSelect"></select>
+
+    <div id="calendar"></div>
+</main>
+
+<footer>
+    powered by AI. Adam Chołuj
+</footer>
+
+<button id="adminBtn">Admin</button>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getFirestore, collection, getDocs,
+  addDoc, setDoc, doc, updateDoc
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+firebaseConfig = {
+  apiKey: "AIzaSyDwcNJhOylV5fbBSYNZzrTKWrfHyDY2L5I",
+  authDomain: "kalendarz-slwopr.firebaseapp.com",
+  projectId: "kalendarz-slwopr",
+  storageBucket: "kalendarz-slwopr.firebasestorage.app",
+  messagingSenderId: "732857052734",
+  appId: "1:732857052734:web:39404271e1c04a280fab6f",
+  measurementId: "G-S9ZYBV94W3"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const ADMIN_PASSWORD = "admin123"; // ZMIEŃ
+const START_DATE = new Date("2025-12-27");
+
+let workers = [];
+let availability = {};
+let schedule = {};
+let currentWorkerId = null;
+let isAdmin = false;
+
+const workersRef = collection(db, "workers");
+const availRef = collection(db, "availability");
+const schedRef = collection(db, "schedule");
+
+function dateKey(date) {
+  return date.toISOString().split("T")[0];
+}
+
+async function loadData() {
+  workers = [];
+  availability = {};
+  schedule = {};
+
+  const wSnap = await getDocs(workersRef);
+  wSnap.forEach(d => workers.push({ id: d.id, ...d.data() }));
+
+  const aSnap = await getDocs(availRef);
+  aSnap.forEach(d => availability[d.id] = d.data().workers || []);
+
+  const sSnap = await getDocs(schedRef);
+  sSnap.forEach(d => schedule[d.id] = d.data().workers || []);
+
+  initWorkerSelect();
+  renderCalendar();
+}
+
+function initWorkerSelect() {
+  const select = document.getElementById("workerSelect");
+  select.innerHTML = "";
+  workers.forEach(w => {
+    const opt = document.createElement("option");
+    opt.value = w.id;
+    opt.textContent = w.name;
+    select.appendChild(opt);
+  });
+  currentWorkerId = workers[0]?.id;
+  select.onchange = () => {
+    currentWorkerId = select.value;
+    renderCalendar();
+  };
+}
+
+async function toggleAvailability(date, id) {
+  availability[date] = availability[date] || [];
+  const list = availability[date];
+
+  if (list.includes(id)) {
+    availability[date] = list.filter(x => x !== id);
+  } else {
+    list.push(id);
+  }
+
+  await setDoc(doc(db, "availability", date), { workers: availability[date] });
+  renderCalendar();
+}
+
+async function toggleSchedule(date, id) {
+  schedule[date] = schedule[date] || [];
+  const list = schedule[date];
+
+  if (list.includes(id)) {
+    schedule[date] = list.filter(x => x !== id);
+  } else {
+    list.push(id);
+  }
+
+  await setDoc(doc(db, "schedule", date), { workers: schedule[date] });
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const cal = document.getElementById("calendar");
+  cal.innerHTML = "";
+
+  for (let i = 0; i < 28; i++) {
+    const d = new Date(START_DATE);
+    d.setDate(d.getDate() + i);
+    const key = dateKey(d);
+
+    const day = document.createElement("div");
+    day.className = "day";
+    day.innerHTML = `<h4>${d.toLocaleDateString("pl-PL")}</h4>`;
+
+    workers.forEach(w => {
+      const isA = availability[key]?.includes(w.id);
+      const isS = schedule[key]?.includes(w.id);
+
+      const row = document.createElement("div");
+      row.className = "worker " + (isS ? "blue" : isA ? "green" : "gray");
+      row.innerHTML = `<span>${w.name}</span>`;
+
+      if (w.id === currentWorkerId && !isAdmin) {
+        const b = document.createElement("button");
+        b.textContent = isA ? "cofnij" : "dostępny";
+        b.onclick = () => toggleAvailability(key, w.id);
+        row.appendChild(b);
+      }
+
+      if (isAdmin) {
+        const b = document.createElement("button");
+        b.textContent = isS ? "usuń" : "pracuje";
+        b.onclick = () => toggleSchedule(key, w.id);
+        row.appendChild(b);
+      }
+
+      day.appendChild(row);
+    });
+
+    cal.appendChild(day);
+  }
+}
+
+document.getElementById("adminBtn").onclick = () => {
+  const p = prompt("Hasło admina:");
+  if (p === ADMIN_PASSWORD) {
+    isAdmin = !isAdmin;
+    alert(isAdmin ? "Tryb admina" : "Tryb pracownika");
+    renderCalendar();
+  }
+};
+
+loadData();
+</script>
+
+</body>
+</html>
